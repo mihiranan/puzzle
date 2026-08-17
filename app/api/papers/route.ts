@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { indexPlaces } from "@/lib/atlas";
 import { loadAtlas } from "@/lib/load-atlas";
-import { influentialWorksForPlace, workToPin } from "@/lib/openalex";
+import { influentialWorksForPlace, workToPin } from "@/lib/catalog";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);

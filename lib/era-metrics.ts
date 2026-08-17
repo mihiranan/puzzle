@@ -1,6 +1,7 @@
 export const ERA_MIN = 1950;
 export const ERA_MAX = 2026;
 export const KEY_YEARS = [1950, 1960, 1970, 1980, 1990, 2000, 2010, 2018, 2024];
+export const PRESENT_YEAR = KEY_YEARS[KEY_YEARS.length - 1];
 
 export type EraSnapshots = {
   years: number[];
@@ -19,7 +20,7 @@ export type EraVisuals = {
 };
 
 function countsForKey(snapshots: EraSnapshots, year: number): Record<string, number> {
-  return snapshots.counts[year] ?? snapshots.counts[String(year) as unknown as number] ?? {};
+  return snapshots.counts[year] ?? {};
 }
 
 export function countsAtYear(snapshots: EraSnapshots, year: number): Record<string, number> {
@@ -80,6 +81,17 @@ export function scaleCountsToYear(
 
 export function isPlaceKind(kind: string): boolean {
   return kind === "domain" || kind === "field" || kind === "subfield" || kind === "topic";
+}
+
+export function fieldEraScale(
+  fieldId: string | null | undefined,
+  growth: Record<string, number>,
+  eraReady = false,
+): number {
+  if (!fieldId || !eraReady) return 1;
+  const grown = growth[fieldId];
+  if (grown == null || grown < 0.015) return 0;
+  return 0.1 + 0.9 * grown ** 0.55;
 }
 
 export function isAliveInEra(

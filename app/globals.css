@@ -3,25 +3,12 @@
 :root {
   --void: #050403;
   --ocean: #0a0806;
-  --ocean-deep: #050403;
-  --foam: #f3e6d2;
   --ink: #f3eadc;
   --muted: rgba(232, 196, 150, 0.58);
-  --faint: rgba(232, 135, 42, 0.14);
-  --glass: rgba(10, 7, 4, 0.72);
-  --glass-strong: rgba(6, 4, 2, 0.88);
   --line: rgba(232, 135, 42, 0.28);
   --line-strong: rgba(232, 135, 42, 0.5);
-  --glow: rgba(232, 135, 42, 0.28);
   --signal: #e8872a;
   --signal-hot: #ffc078;
-  --cyan: var(--signal);
-  --cyan-hot: var(--signal-hot);
-  --physical: #c45a1a;
-  --life: #8a6a32;
-  --health: #b44a28;
-  --social: #d4922a;
-  --focus: #ffc078;
   color-scheme: dark;
 }
 
@@ -69,7 +56,7 @@ input {
 }
 
 .search-shell {
-  top: max(0.7rem, env(safe-area-inset-top));
+  top: max(1.55rem, calc(env(safe-area-inset-top) + 0.85rem));
   left: max(0.7rem, env(safe-area-inset-left));
   width: min(
     22rem,
@@ -109,18 +96,13 @@ input {
   color: #fff4e4;
 }
 
-.topos-map {
+.puzzle-map {
   width: 100%;
   height: 100%;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-}
-
-.topos-map .maplibregl-ctrl-attrib,
-.topos-map .maplibregl-ctrl-logo {
-  display: none;
 }
 
 .hud-scan {
@@ -199,8 +181,7 @@ input {
 }
 
 .hud-panel,
-.hud-bar,
-.hud-chip {
+.hud-bar {
   position: relative;
   background:
     linear-gradient(180deg, rgba(22, 14, 8, 0.82), rgba(8, 6, 4, 0.9)),
@@ -530,44 +511,6 @@ input {
   transition: opacity 180ms ease, color 180ms ease;
 }
 
-@keyframes decode-flicker {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  46% {
-    opacity: 0.55;
-  }
-  50% {
-    opacity: 1;
-  }
-  54% {
-    opacity: 0.7;
-  }
-}
-
-.decode-live {
-  animation: decode-flicker 1.4s steps(2, end) infinite;
-}
-
-@keyframes blink-cursor {
-  0%,
-  45% {
-    opacity: 1;
-  }
-  50%,
-  100% {
-    opacity: 0;
-  }
-}
-
-.blink-cursor::after {
-  content: "█";
-  margin-left: 3px;
-  color: var(--signal);
-  animation: blink-cursor 1s steps(1) infinite;
-}
-
 @keyframes sweep {
   from {
     transform: translateX(-120%);
@@ -575,21 +518,6 @@ input {
   to {
     transform: translateX(220%);
   }
-}
-
-.decode-sweep {
-  position: relative;
-  overflow: hidden;
-}
-
-.decode-sweep::after {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 28%;
-  background: linear-gradient(90deg, transparent, rgba(232, 135, 42, 0.18), transparent);
-  animation: sweep 2.4s linear infinite;
-  pointer-events: none;
 }
 
 @keyframes sync-spin {
@@ -629,28 +557,6 @@ input {
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: pre-wrap;
-}
-
-@keyframes hex-roll {
-  from {
-    transform: translateY(0);
-  }
-  to {
-    transform: translateY(-50%);
-  }
-}
-
-.hex-ticker {
-  height: 1em;
-  overflow: hidden;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
-  letter-spacing: 0.12em;
-  color: var(--signal);
-}
-
-.hex-ticker > span {
-  display: block;
-  animation: hex-roll 8s linear infinite;
 }
 
 .hud-zoom button {

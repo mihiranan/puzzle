@@ -1,6 +1,6 @@
 import type { Atlas, EntityKind, Place, PlaceKind } from "./types";
 
-export function hash32(s: string): number {
+function hash32(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
@@ -89,7 +89,6 @@ export function zoomForKind(kind: EntityKind): number {
   }
 }
 
-/** Fit the clicked piece so its next layer of pieces and their names stay on screen. */
 export function cameraForPlace(
   atlas: Atlas,
   place: Place,
@@ -161,12 +160,19 @@ export function locatePlace(
   return null;
 }
 
-export function nearestPlace(atlas: Atlas, lon: number, lat: number, kind?: PlaceKind): Place | null {
+export function nearestPlace(
+  atlas: Atlas,
+  lon: number,
+  lat: number,
+  kind?: PlaceKind,
+  allow?: (place: Place) => boolean,
+): Place | null {
   let best: Place | null = null;
   let bestD = Infinity;
   for (const place of atlas.places) {
     if (kind && place.kind !== kind) continue;
     if (place.kind === "topic") continue;
+    if (allow && !allow(place)) continue;
     const d = (place.lon - lon) ** 2 + (place.lat - lat) ** 2;
     if (d < bestD) {
       bestD = d;
@@ -176,56 +182,15 @@ export function nearestPlace(atlas: Atlas, lon: number, lat: number, kind?: Plac
   return best;
 }
 
-export function placeAtZoom(atlas: Atlas, lon: number, lat: number, zoom: number): Place | null {
-  const kind: PlaceKind = zoom >= 4.2 ? "subfield" : zoom >= 2.4 ? "field" : "domain";
-  return nearestPlace(atlas, lon, lat, kind) ?? nearestPlace(atlas, lon, lat);
-}
-
-function planarDistance(lon: number, lat: number, place: Place): number {
-  const cos = Math.cos((lat * Math.PI) / 180) || 0.2;
-  const dx = (place.lon - lon) * cos;
-  const dy = place.lat - lat;
-  return Math.hypot(dx, dy);
-}
-
-export function placeAtPoint(
+export function placeAtZoom(
   atlas: Atlas,
   lon: number,
   lat: number,
   zoom: number,
   allow?: (place: Place) => boolean,
 ): Place | null {
-  const kinds: PlaceKind[] =
-    zoom >= 5
-      ? ["topic", "subfield", "field", "domain"]
-      : zoom >= 3.4
-        ? ["subfield", "field", "domain"]
-        : zoom >= 2
-          ? ["field", "domain"]
-          : ["domain", "field"];
-
-  let best: Place | null = null;
-  let bestScore = Infinity;
-  for (const place of atlas.places) {
-    if (!kinds.includes(place.kind)) continue;
-    if (allow && !allow(place)) continue;
-    const distance = planarDistance(lon, lat, place);
-    const reach =
-      place.radius > 0
-        ? place.radius * 1.35
-        : place.kind === "domain"
-          ? 22
-          : place.kind === "field"
-            ? 8
-            : 2.4;
-    if (distance > reach) continue;
-    const kindBias =
-      place.kind === "topic" ? 0 : place.kind === "subfield" ? 0.8 : place.kind === "field" ? 2.2 : 6;
-    const score = distance + kindBias;
-    if (score < bestScore) {
-      bestScore = score;
-      best = place;
-    }
-  }
-  return best;
+  const kind: PlaceKind = zoom >= 4.2 ? "subfield" : zoom >= 2.4 ? "field" : "domain";
+  return nearestPlace(atlas, lon, lat, kind, allow) ?? nearestPlace(atlas, lon, lat, undefined, allow);
 }
+
+

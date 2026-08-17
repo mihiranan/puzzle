@@ -47,7 +47,6 @@ export function defaultHeight(): number {
   return typeof window === "undefined" ? 800 : window.innerHeight;
 }
 
-/** Map area left after chrome, used so fly-to fits a phone as well as a desktop. */
 export function usableMapView(
   width = defaultWidth(),
   height = defaultHeight(),

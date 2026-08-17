@@ -1,3 +1,5 @@
+import type { FeatureCollection, Polygon } from "geojson";
+
 export type PlaceKind = "domain" | "field" | "subfield" | "topic";
 
 export type EntityKind =
@@ -10,7 +12,7 @@ export type EntityKind =
 
 export type Place = {
   id: string;
-  openalexId: string;
+  sourceId: string;
   name: string;
   kind: PlaceKind;
   description?: string;
@@ -56,16 +58,16 @@ export type Atlas = {
   };
   places: Place[];
   geojson: {
-    domains: GeoJSON.FeatureCollection<GeoJSON.Polygon, AtlasFeatureProperties>;
-    fields: GeoJSON.FeatureCollection<GeoJSON.Polygon, AtlasFeatureProperties>;
-    subfields: GeoJSON.FeatureCollection<GeoJSON.Polygon, AtlasFeatureProperties>;
-    topics: GeoJSON.FeatureCollection<GeoJSON.Polygon, AtlasFeatureProperties>;
+    domains: FeatureCollection<Polygon, AtlasFeatureProperties>;
+    fields: FeatureCollection<Polygon, AtlasFeatureProperties>;
+    subfields: FeatureCollection<Polygon, AtlasFeatureProperties>;
+    topics: FeatureCollection<Polygon, AtlasFeatureProperties>;
   };
 };
 
 export type SearchHit = {
   id: string;
-  openalexId: string;
+  sourceId: string;
   kind: EntityKind;
   name: string;
   hint?: string | null;
@@ -119,7 +121,7 @@ export type NeighborhoodLink = {
 
 export type InspectedEntity = {
   id: string;
-  openalexId: string;
+  sourceId: string;
   kind: EntityKind;
   name: string;
   hint?: string | null;

@@ -9,6 +9,8 @@ import {
   countsAtYear,
   ERA_MAX,
   ERA_MIN,
+  fieldEraScale,
+  isAliveInEra,
   isPlaceKind,
   visualsFromCounts,
   type EraSnapshots,
@@ -28,8 +30,6 @@ import Timeline from "./Timeline";
 
 const KnowledgeMap = dynamic(() => import("./KnowledgeMap"), { ssr: false });
 
-const YEAR_MIN = ERA_MIN;
-const YEAR_MAX = ERA_MAX;
 const PLAY_YEARS_PER_SECOND = 7;
 
 export default function Explorer() {
@@ -49,7 +49,7 @@ export default function Explorer() {
   const [era, setEra] = useState<EraLandscape | null>(null);
   const [eraLoading, setEraLoading] = useState(false);
   const [flyTo, setFlyTo] = useState<FlyTo | null>(null);
-  const [year, setYear] = useState(YEAR_MAX);
+  const [year, setYear] = useState(ERA_MAX);
   const [playing, setPlaying] = useState(false);
   const [snapshots, setSnapshots] = useState<EraSnapshots | null>(null);
   const [hoverName, setHoverName] = useState<string | null>(null);
@@ -196,7 +196,7 @@ export default function Explorer() {
           : place.citedByCount;
       return {
         id: place.id,
-        openalexId: place.openalexId,
+        sourceId: place.sourceId,
         kind: place.kind,
         name: place.name,
         hint: place.description || place.kind,
@@ -254,6 +254,10 @@ export default function Explorer() {
       const req = ++entityReq.current;
       setWelcome(false);
       setSearchOpen(false);
+      if (shouldFly) {
+        setSheetHidden(false);
+        setSheetRatio(0.58);
+      }
       setEntityLoading(true);
       setEntityError(null);
       if (shouldFly && atlas) {
@@ -360,10 +364,7 @@ export default function Explorer() {
   }, [atlas, settledYear, view.lon, view.lat, view.zoom]);
 
   useEffect(() => {
-    if (!atlas || view.zoom < 4.8 || !focusId) {
-      setPapersLoading(false);
-      return;
-    }
+    if (!atlas || view.zoom < 4.8 || !focusId) return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setPapersLoading(true);
@@ -394,9 +395,9 @@ export default function Explorer() {
 
   useEffect(() => {
     if (!playing) return;
-    if (yearRef.current >= YEAR_MAX - 0.05) {
-      yearRef.current = YEAR_MIN;
-      setYear(YEAR_MIN);
+    if (yearRef.current >= ERA_MAX - 0.05) {
+      yearRef.current = ERA_MIN;
+      setYear(ERA_MIN);
     }
     let frame = 0;
     let last = performance.now();
@@ -404,9 +405,9 @@ export default function Explorer() {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const next = yearRef.current + dt * PLAY_YEARS_PER_SECOND;
-      if (next >= YEAR_MAX) {
-        yearRef.current = YEAR_MAX;
-        setYear(YEAR_MAX);
+      if (next >= ERA_MAX) {
+        yearRef.current = ERA_MAX;
+        setYear(ERA_MAX);
         setPlaying(false);
         return;
       }
@@ -417,11 +418,6 @@ export default function Explorer() {
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [playing]);
-
-  useEffect(() => {
-    setSheetHidden(false);
-    setSheetRatio(0.58);
-  }, [entity?.id]);
 
   const closeInspector = useCallback(() => {
     entityReq.current += 1;
@@ -474,8 +470,12 @@ export default function Explorer() {
   const openId = entity?.id;
   useEffect(() => {
     if (!openId || settledYear == null) return;
-    void openEntity(openId, false);
-    // Refresh the open file when the year changes so tab counts stay true.
+    const timer = window.setTimeout(() => {
+      void openEntity(openId, false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // Refetch the open file when the year settles. Do not depend on openEntity or the
+    // entity id — opening already fetches, and openEntity's identity changes often.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settledYear]);
 
@@ -555,7 +555,13 @@ export default function Explorer() {
     );
   }
 
-  const here = atlas ? placeAtZoom(atlas, view.lon, view.lat, view.zoom) : null;
+  const here = atlas
+    ? placeAtZoom(atlas, view.lon, view.lat, view.zoom, (place) => {
+        if (!isAliveInEra(place.id, place.kind, year, eraCounts)) return false;
+        const fieldId = place.kind === "field" ? place.id : place.fieldId;
+        return fieldEraScale(fieldId, growth, eraCounts != null) > 0;
+      })
+    : null;
   const crumb = here ?? (atlas ? nearestPlace(atlas, view.lon, view.lat, "domain") : null);
   const loc = hoverName ?? crumb?.name ?? "Scan a region";
   const dossierOpen = Boolean(entity || entityLoading || entityError);
@@ -564,11 +570,8 @@ export default function Explorer() {
   const eraProps = {
     year: Math.round(year),
     playing,
-    loading: eraLoading && !snapshots,
-    headline: playing ? null : era?.headline,
-    hottestField: interpolated?.hottestField ?? era?.hottestField,
-    min: YEAR_MIN,
-    max: YEAR_MAX,
+    min: ERA_MIN,
+    max: ERA_MAX,
     onYear: (next: number) => {
       setPlaying(false);
       yearRef.current = next;
@@ -613,16 +616,19 @@ export default function Explorer() {
       <div className="hud-scan" />
 
       <header className="search-shell pointer-events-none absolute z-40 flex flex-col items-stretch gap-2 md:z-20 md:gap-3">
-        <div className="flex items-center gap-3">
+        <div className="relative">
           <p className="pointer-events-auto font-[family-name:var(--font-display)] text-[1.35rem] leading-none tracking-[0.18em] sm:text-[1.65rem] sm:tracking-[0.2em]">
             PUZZLE
           </p>
-          <SyncStatus
-            atlasRefreshing={atlasRefreshing}
-            entityLoading={entityLoading}
-            eraLoading={eraLoading}
-            papersLoading={papersLoading}
-          />
+          <div className="pointer-events-none absolute top-1/2 left-full ml-2 -translate-y-1/2">
+            <SyncStatus
+              compact={narrow}
+              atlasRefreshing={atlasRefreshing}
+              entityLoading={entityLoading}
+              eraLoading={narrow ? false : eraLoading}
+              papersLoading={narrow ? false : view.zoom >= 4.8 && papersLoading}
+            />
+          </div>
         </div>
         <SearchOmnibox
           query={query}

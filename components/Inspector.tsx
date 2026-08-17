@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { citesThroughYear, isAliveInEra, isPlaceKind, worksThroughYear } from "@/lib/era-metrics";
 import { cleanText, compactNumber, kindLabel, polishCopy } from "@/lib/format";
 import type { InspectedEntity, NeighborhoodLink } from "@/lib/types";
@@ -32,11 +32,14 @@ export default function Inspector({
   onGrab,
   onMinimize,
 }: Props) {
-  const [tab, setTab] = useState<Tab>("intel");
-
-  useEffect(() => {
-    setTab("intel");
-  }, [entity?.id]);
+  const [tabState, setTabState] = useState<{ id: string | null; tab: Tab }>({
+    id: null,
+    tab: "intel",
+  });
+  const tab = entity && tabState.id === entity.id ? tabState.tab : "intel";
+  const setTab = (next: Tab) => {
+    if (entity) setTabState({ id: entity.id, tab: next });
+  };
 
   if (!entity && !loading && !error) return null;
 
@@ -257,7 +260,6 @@ function IntelTab({
   inside: NeighborhoodLink[];
   onOpen: (id: string) => void;
 }) {
-
   return (
     <>
       {entity.whyHere && (
@@ -329,7 +331,7 @@ function eraSizedLinks(
     return {
       ...item,
       worksCount: works,
-      citedByCount: citesThroughYear(item.citedByCount, works, item.worksCount ?? item.citedByCount),
+      citedByCount: citesThroughYear(item.citedByCount, works, item.worksCount),
     };
   });
 }

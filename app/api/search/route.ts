@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { searchPlaces } from "@/lib/atlas";
 import { loadAtlas } from "@/lib/load-atlas";
-import { autocomplete } from "@/lib/openalex";
+import { autocomplete } from "@/lib/catalog";
 import type { SearchHit } from "@/lib/types";
 
 export async function GET(request: Request) {
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   const atlas = await loadAtlas();
   const local: SearchHit[] = searchPlaces(atlas, q, 6).map((place) => ({
     id: place.id,
-    openalexId: place.openalexId,
+    sourceId: place.sourceId,
     kind: place.kind,
     name: place.name,
     hint: place.description || place.kind,
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   try {
     remote = await autocomplete(q);
   } catch (error) {
-    console.error("OpenAlex autocomplete failed", error);
+    console.error("Catalog autocomplete failed", error);
   }
 
   const seen = new Set(local.map((hit) => hit.id));

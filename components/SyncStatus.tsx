@@ -7,6 +7,7 @@ type Props = {
   entityLoading?: boolean;
   eraLoading?: boolean;
   papersLoading?: boolean;
+  compact?: boolean;
 };
 
 function useHeldFlag(active: boolean, showAfter = 120, holdFor = 280) {
@@ -29,6 +30,7 @@ export default function SyncStatus({
   entityLoading = false,
   eraLoading = false,
   papersLoading = false,
+  compact = false,
 }: Props) {
   const busy = atlasRefreshing || entityLoading || eraLoading || papersLoading;
   const visible = useHeldFlag(busy);
@@ -40,13 +42,17 @@ export default function SyncStatus({
         ? "Reading this year"
         : papersLoading
           ? "Placing papers"
-          : "Updating";
+          : null;
 
-  if (!visible) return null;
+  if (!visible || !label) return null;
+
+  if (compact) {
+    return <span className="sync-spinner" role="status" aria-label={label} />;
+  }
 
   return (
     <div
-      className="hud-bar pointer-events-none flex items-center gap-2 px-2.5 py-1.5"
+      className="pointer-events-none flex items-center gap-2 whitespace-nowrap"
       role="status"
       aria-live="polite"
       aria-busy="true"

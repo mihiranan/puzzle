@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { isAliveInEra } from "@/lib/era-metrics";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { fieldEraScale, isAliveInEra } from "@/lib/era-metrics";
 import {
   clampCamera,
   INITIAL_CAMERA,
@@ -11,7 +11,7 @@ import {
   type Camera,
 } from "@/lib/camera";
 import { cleanText, compactNumber } from "@/lib/format";
-import { domainPaint, featureAtPoint, featureTint, featuresFromCollection, pointInRing, shadeHex } from "@/lib/geo";
+import { domainPaint, featureAtPoint, featureTint, featuresFromCollection, shadeHex } from "@/lib/geo";
 import { fillItemsInRing } from "@/lib/tessellate";
 import type { Atlas, FlyTo, Pin } from "@/lib/types";
 
@@ -85,6 +85,8 @@ export default function KnowledgeMap({
   const onViewRef = useRef(onViewChange);
   const onResetRef = useRef(onReset);
   const landRef = useRef<SVGGElement>(null);
+  const labelLayerRef = useRef<HTMLDivElement>(null);
+  const labelCamRef = useRef<Camera>(INITIAL_CAMERA);
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{
     startDist: number;
@@ -96,10 +98,15 @@ export default function KnowledgeMap({
   } | null>(null);
   const pinchedRef = useRef(false);
   const canHoverRef = useRef(false);
-  const interactingRef = useRef(false);
   const lastTapRef = useRef(0);
   const lastMoveRef = useRef({ x: 0, y: 0, t: 0, vx: 0, vy: 0 });
   const coastRaf = useRef(0);
+  const animateRef = useRef<() => void>(() => {});
+  const zoomAtRef = useRef<(x: number, y: number, delta: number, width?: number, height?: number) => void>(
+    () => {},
+  );
+  const zoomByRef = useRef<(delta: number) => void>(() => {});
+  const resetViewRef = useRef<() => void>(() => {});
   const [finePointer, setFinePointer] = useState(false);
   const [hudLive, setHudLive] = useState(true);
 
@@ -150,19 +157,35 @@ export default function KnowledgeMap({
       `translate(${sizeRef.current.width / 2} ${sizeRef.current.height / 2}) scale(${nextScale}) translate(${-next.lon} ${next.lat})`,
     );
   };
+  const applyLabelTransform = (next: Camera) => {
+    const el = labelLayerRef.current;
+    if (!el) return;
+    const from = labelCamRef.current;
+    const s0 = pixelsPerDegree(from.zoom);
+    const s1 = pixelsPerDegree(next.zoom);
+    const k = s1 / Math.max(s0, 1e-6);
+    const w = sizeRef.current.width;
+    const h = sizeRef.current.height;
+    const tx = (1 - k) * (w / 2) - (next.lon - from.lon) * s1;
+    const ty = (1 - k) * (h / 2) + (next.lat - from.lat) * s1;
+    el.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`;
+  };
   const paintCamera = (next: Camera, commit = false) => {
     displayRef.current = next;
     applyLandTransform(next);
-    if (!commit) return;
-    setCamera(next);
-    onViewRef.current(next.lon, next.lat, next.zoom);
+    if (commit) {
+      labelCamRef.current = next;
+      if (labelLayerRef.current) labelLayerRef.current.style.transform = "none";
+      setCamera(next);
+      onViewRef.current(next.lon, next.lat, next.zoom);
+      return;
+    }
+    applyLabelTransform(next);
   };
   const freezeHud = () => {
-    interactingRef.current = true;
     setHudLive(false);
   };
   const thawHud = () => {
-    interactingRef.current = false;
     paintCamera(displayRef.current, true);
     setHudLive(true);
   };
@@ -232,7 +255,6 @@ export default function KnowledgeMap({
       if (settled) {
         rafRef.current = 0;
         anchorRef.current = null;
-        interactingRef.current = false;
         setHudLive(true);
         return;
       }
@@ -262,6 +284,8 @@ export default function KnowledgeMap({
 
   useEffect(() => {
     sizeRef.current = size;
+    labelCamRef.current = displayRef.current;
+    if (labelLayerRef.current) labelLayerRef.current.style.transform = "none";
   }, [size]);
 
   const zoomAt = (x: number, y: number, delta: number, width = sizeRef.current.width, height = sizeRef.current.height) => {
@@ -287,12 +311,17 @@ export default function KnowledgeMap({
   };
 
   useEffect(() => {
+    animateRef.current = animateTowardTarget;
+    zoomAtRef.current = zoomAt;
+    zoomByRef.current = zoomBy;
+    resetViewRef.current = resetView;
+  });
+
+  useEffect(() => {
     if (!flyTo) return;
     anchorRef.current = null;
     targetRef.current = clampCamera({ lon: flyTo.lon, lat: flyTo.lat, zoom: flyTo.zoom });
-    freezeHud();
-    animateTowardTarget();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    animateRef.current();
   }, [flyTo]);
 
   useEffect(() => {
@@ -301,9 +330,7 @@ export default function KnowledgeMap({
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       const rect = root.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      zoomAt(x, y, wheelDelta(event), rect.width, rect.height);
+      zoomAtRef.current(event.clientX - rect.left, event.clientY - rect.top, wheelDelta(event), rect.width, rect.height);
     };
     const blockTouch = (event: TouchEvent) => {
       if (event.touches.length >= 1) event.preventDefault();
@@ -316,15 +343,19 @@ export default function KnowledgeMap({
       root.removeEventListener("wheel", onWheel);
       root.removeEventListener("touchmove", blockTouch);
       root.removeEventListener("gesturestart", blockGesture);
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size.width, size.height]);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (coastRaf.current) cancelAnimationFrame(coastRaf.current);
+    };
+  }, []);
 
   const scale = pixelsPerDegree(camera.zoom);
   const transform = `translate(${size.width / 2} ${size.height / 2}) scale(${scale}) translate(${-camera.lon} ${camera.lat})`;
   const compact = size.width < 768;
-  const showFields = true;
   const showSubfields = camera.zoom >= (compact ? 3.35 : 3.15);
   const showTopics = camera.zoom >= (compact ? 4.55 : 4.2);
   const showPapers = camera.zoom >= 5.8;
@@ -345,30 +376,19 @@ export default function KnowledgeMap({
 
   const alive = (id: string, kind: string) => isAliveInEra(id, kind, year, eraCounts);
 
-  const fieldIsLive = (feature: { id: string; fieldId?: string | null }) => {
-    const fieldId = feature.id.startsWith("field:") ? feature.id : feature.fieldId;
-    if (!fieldId) return true;
-    return isAliveInEra(fieldId, "field", year, eraCounts);
-  };
-
-  useEffect(() => {
-    if (!selectedId) return;
-    const place = atlas.places.find((row) => row.id === selectedId);
-    if (place) setEnteredId(place.id);
-  }, [selectedId, atlas]);
+  const selectedPlaceId =
+    selectedId && atlas.places.some((place) => place.id === selectedId) ? selectedId : null;
+  if (selectedPlaceId && selectedPlaceId !== enteredId) {
+    setEnteredId(selectedPlaceId);
+  }
 
   const entered = useMemo(() => {
     if (!enteredId) return null;
     return atlas.places.find((place) => place.id === enteredId) ?? null;
   }, [enteredId, atlas]);
 
-  const eraScale = (fieldId: string | null | undefined) => {
-    if (!fieldId) return 1;
-    const grown = growth[fieldId];
-    if (grown == null) return 1;
-    if (grown < 0.015) return 0;
-    return 0.1 + 0.9 * grown ** 0.55;
-  };
+  const eraReady = eraCounts != null;
+  const eraScale = (fieldId: string | null | undefined) => fieldEraScale(fieldId, growth, eraReady);
 
   const paperCells = useMemo(() => {
     if (!showPapers || !entered || entered.kind !== "topic") return [];
@@ -383,33 +403,40 @@ export default function KnowledgeMap({
     }));
   }, [showPapers, entered, topicCells, visiblePins, compact]);
 
-  const pickAt = (lon: number, lat: number) => {
-    for (const field of fields) {
-      const s = eraScale(field.id);
-      if (s <= 0 || !alive(field.id, "field")) continue;
-      const testLon = field.lon + (lon - field.lon) / s;
-      const testLat = field.lat + (lat - field.lat) / s;
-      const papersHere =
-        showPapers && paperCells.length
-          ? paperCells.filter((cell) => cell.fieldId === field.id)
-          : [];
-      const layers = [
-        papersHere.length ? (papersHere as typeof topicCells) : [],
-        showTopics ? topicCells.filter((row) => row.fieldId === field.id) : [],
-        showSubfields ? subfields.filter((row) => row.fieldId === field.id) : [],
-        [field],
-      ].filter((layer) => layer.length > 0);
-      const hit = featureAtPoint(layers, testLon, testLat);
-      if (hit) return hit;
-    }
-    return featureAtPoint([domains], lon, lat);
-  };
+  const pickAt = useCallback(
+    (lon: number, lat: number) => {
+      const ready = eraCounts != null;
+      for (const field of fields) {
+        const s = fieldEraScale(field.id, growth, ready);
+        if (s <= 0 || !isAliveInEra(field.id, "field", year, eraCounts)) continue;
+        const testLon = field.lon + (lon - field.lon) / s;
+        const testLat = field.lat + (lat - field.lat) / s;
+        const papersHere =
+          showPapers && s >= 0.85 && paperCells.length
+            ? paperCells.filter((cell) => cell.fieldId === field.id)
+            : [];
+        const layers = [
+          papersHere.length ? (papersHere as typeof topicCells) : [],
+          showTopics && s >= 0.85
+            ? topicCells.filter((row) => row.fieldId === field.id && isAliveInEra(row.id, "topic", year, eraCounts))
+            : [],
+          showSubfields && s >= 0.62
+            ? subfields.filter((row) => row.fieldId === field.id && isAliveInEra(row.id, "subfield", year, eraCounts))
+            : [],
+          [field],
+        ].filter((layer) => layer.length > 0);
+        const hit = featureAtPoint(layers, testLon, testLat);
+        if (hit) return hit;
+      }
+      return featureAtPoint([domains], lon, lat);
+    },
+    [fields, growth, eraCounts, year, showPapers, paperCells, showTopics, topicCells, showSubfields, subfields, domains],
+  );
 
   const hoverFeature = useMemo(() => {
     if (!cursor) return null;
     return pickAt(cursor.lon, cursor.lat);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor, showTopics, showSubfields, showPapers, topicCells, subfields, fields, domains, paperCells, year, eraCounts]);
+  }, [cursor, pickAt]);
 
   const settledPins = useMemo(() => {
     if (!paperCells.length) return visiblePins;
@@ -460,7 +487,6 @@ export default function KnowledgeMap({
 
   const listedPaper = paperCells.find((cell) => cell.id === listHoverId) ?? null;
   const listedTopic = topicCells.find((topic) => topic.id === listHoverId) ?? null;
-  const activeCell = listedPaper ?? paperUnderCursor;
 
   useEffect(() => {
     onFocusRef.current(entered?.id ?? null);
@@ -490,8 +516,20 @@ export default function KnowledgeMap({
 
   const labels = useMemo(
     () =>
-      collectLabels(camera, size, domains, fields, subfields, topicCells, entered, year, eraCounts, bottomInset),
-    [camera, size, domains, fields, subfields, topicCells, entered, year, eraCounts, bottomInset],
+      collectLabels(
+        camera,
+        size,
+        domains,
+        fields,
+        subfields,
+        topicCells,
+        entered,
+        year,
+        eraCounts,
+        growth,
+        bottomInset,
+      ),
+    [camera, size, domains, fields, subfields, topicCells, entered, year, eraCounts, growth, bottomInset],
   );
 
   const enteredFeature = useMemo(() => {
@@ -504,6 +542,9 @@ export default function KnowledgeMap({
       null
     );
   }, [entered, topicCells, subfields, fields, domains]);
+
+  const enteredAnchor = enteredFeature ? fieldAnchor(enteredFeature, fields) : null;
+  const hoverAnchor = hoverFeature ? fieldAnchor(hoverFeature, fields) : null;
 
   const pointerPoint = useMemo(() => {
     if (!cursor) return null;
@@ -525,25 +566,22 @@ export default function KnowledgeMap({
     return fallback;
   };
 
-
-
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       if (event.key === "=" || event.key === "+") {
         event.preventDefault();
-        zoomBy(0.7);
+        zoomByRef.current(0.7);
       } else if (event.key === "-" || event.key === "_") {
         event.preventDefault();
-        zoomBy(-0.7);
+        zoomByRef.current(-0.7);
       } else if (event.key === "0") {
         event.preventDefault();
-        resetView();
+        resetViewRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -724,7 +762,7 @@ export default function KnowledgeMap({
   return (
     <div
       ref={rootRef}
-      className="topos-map absolute inset-0 z-0 h-full w-full cursor-grab overflow-hidden active:cursor-grabbing"
+      className="puzzle-map absolute inset-0 z-0 h-full w-full cursor-grab overflow-hidden active:cursor-grabbing"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -767,8 +805,14 @@ export default function KnowledgeMap({
             if (sizeNow <= 0 || !alive(field.id, "field")) return null;
             const paint = domainPaint(field.domainId);
             const heat = strength(field.id, 0.7);
-            const kids = showSubfields ? (subfieldsByField.get(field.id) ?? []) : [];
-            const rawTopics = showTopics ? (topicsByField.get(field.id) ?? []) : [];
+            const kids =
+              showSubfields && sizeNow >= 0.62
+                ? (subfieldsByField.get(field.id) ?? []).filter((row) => alive(row.id, "subfield"))
+                : [];
+            const rawTopics =
+              showTopics && sizeNow >= 0.85
+                ? (topicsByField.get(field.id) ?? []).filter((row) => alive(row.id, "topic"))
+                : [];
             const topics = cullFeatures(rawTopics, camera, size, compact ? 90 : 180, entered);
             const papers =
               showPapers && entered?.kind === "topic"
@@ -776,19 +820,17 @@ export default function KnowledgeMap({
                 : [];
             return (
               <g key={field.id} transform={fieldTransform(field.id, field.lon, field.lat)}>
-                {showFields && (
-                  <path
-                    data-id={field.id}
-                    data-name={field.name}
-                    d={field.path}
-                    fill={shadeHex(featureTint(field.id, paint.fill), -28 + Math.round(heat * 42))}
-                    fillOpacity={(0.4 + heat * 0.55) * veil(field)}
-                    stroke={paint.coast}
-                    strokeOpacity={(0.38 + heat * 0.35) * Math.max(veil(field), 0.22)}
-                    strokeWidth={(camera.zoom < 3.2 ? 1.05 : 0.62) / scale}
-                    style={{ cursor: "pointer" }}
-                  />
-                )}
+                <path
+                  data-id={field.id}
+                  data-name={field.name}
+                  d={field.path}
+                  fill={shadeHex(featureTint(field.id, paint.fill), -28 + Math.round(heat * 42))}
+                  fillOpacity={(0.4 + heat * 0.55) * veil(field)}
+                  stroke={paint.coast}
+                  strokeOpacity={(0.38 + heat * 0.35) * Math.max(veil(field), 0.22)}
+                  strokeWidth={(camera.zoom < 3.2 ? 1.05 : 0.62) / scale}
+                  style={{ cursor: "pointer" }}
+                />
                 {kids.map((feature) => (
                   <path
                     key={feature.id}
@@ -834,14 +876,10 @@ export default function KnowledgeMap({
               </g>
             );
           })}
-          {enteredFeature && enteredFeature.id !== hoverFeature?.id && (
+          {enteredFeature && enteredAnchor && enteredFeature.id !== hoverFeature?.id && (
             <g
               pointerEvents="none"
-              transform={fieldTransform(
-                enteredFeature.id.startsWith("field:") ? enteredFeature.id : (enteredFeature.fieldId ?? null),
-                fields.find((row) => row.id === (enteredFeature.id.startsWith("field:") ? enteredFeature.id : enteredFeature.fieldId))?.lon ?? enteredFeature.lon,
-                fields.find((row) => row.id === (enteredFeature.id.startsWith("field:") ? enteredFeature.id : enteredFeature.fieldId))?.lat ?? enteredFeature.lat,
-              )}
+              transform={fieldTransform(enteredAnchor.fieldId, enteredAnchor.lon, enteredAnchor.lat)}
             >
               <path
                 d={enteredFeature.path}
@@ -853,15 +891,11 @@ export default function KnowledgeMap({
               />
             </g>
           )}
-          {finePointer && hoverFeature && (
+          {finePointer && hoverFeature && hoverAnchor && (
             <g
               className="hud-trace"
               pointerEvents="none"
-              transform={fieldTransform(
-                hoverFeature.id.startsWith("field:") ? hoverFeature.id : (hoverFeature.fieldId ?? null),
-                fields.find((row) => row.id === (hoverFeature.id.startsWith("field:") ? hoverFeature.id : hoverFeature.fieldId))?.lon ?? hoverFeature.lon,
-                fields.find((row) => row.id === (hoverFeature.id.startsWith("field:") ? hoverFeature.id : hoverFeature.fieldId))?.lat ?? hoverFeature.lat,
-              )}
+              transform={fieldTransform(hoverAnchor.fieldId, hoverAnchor.lon, hoverAnchor.lat)}
             >
               <path
                 d={hoverFeature.path}
@@ -1008,7 +1042,11 @@ export default function KnowledgeMap({
         </div>
       </div>
 
-      <div className="pointer-events-none absolute inset-0 z-10">
+      <div
+        ref={labelLayerRef}
+        className="pointer-events-none absolute inset-0 z-10 origin-top-left"
+        style={{ willChange: "transform" }}
+      >
         {labels.map((label) => (
             <button
               key={`label-${label.id}`}
@@ -1066,33 +1104,37 @@ function collectLabels(
   focus: { id: string; kind: string; parentId: string | null; subfieldId?: string; fieldId?: string } | null,
   year: number,
   eraCounts: Record<string, number> | null,
+  growth: Record<string, number>,
   bottomInset = 0,
 ): Label[] {
   const mobile = size.width < 768;
   const padTop = mobile ? 70 : 88;
   const padSide = mobile ? 8 : 48;
   const padBottom = mobile ? Math.max(bottomInset + 18, 84) : 120;
+  const eraReady = eraCounts != null;
+  const byField = new Map(fields.map((field) => [field.id, field]));
 
-  const inView = (lon: number, lat: number) => {
-    const point = project(lon, lat, camera, size.width, size.height);
-    return (
-      point.x > padSide - 20 &&
-      point.y > padTop - 16 &&
-      point.x < size.width - padSide + 20 &&
-      point.y < size.height - padBottom + 16
-    );
+  const placePoint = (item: {
+    id: string;
+    kind: string;
+    lon: number;
+    lat: number;
+    fieldId?: string | null;
+  }) => {
+    const fieldId = item.kind === "field" ? item.id : item.fieldId;
+    const scale = fieldEraScale(fieldId, growth, eraReady);
+    if (item.kind !== "domain" && scale <= 0) return null;
+    if (item.kind === "field" || item.kind === "domain" || !fieldId) {
+      return { lon: item.lon, lat: item.lat, scale };
+    }
+    const home = byField.get(fieldId);
+    if (!home) return { lon: item.lon, lat: item.lat, scale };
+    return {
+      lon: home.lon + (item.lon - home.lon) * scale,
+      lat: home.lat + (item.lat - home.lat) * scale,
+      scale,
+    };
   };
-  const largeEnough = (ring: number[][] | undefined, min: number) =>
-    !ring?.length || screenSpan(ring, camera, size) >= min;
-
-  const focusSubfieldId =
-    focus?.kind === "subfield"
-      ? focus.id
-      : focus?.kind === "topic"
-        ? focus.parentId
-        : (focus?.subfieldId ?? null);
-  const focusTopicId = focus?.kind === "topic" ? focus.id : null;
-  const minSpan = mobile ? (camera.zoom < 3.7 ? 36 : 48) : camera.zoom < 3.7 ? 70 : 96;
 
   type Candidate = {
     id: string;
@@ -1104,43 +1146,44 @@ function collectLabels(
   };
   let candidates: Candidate[] = [];
   const living = (id: string, kind: string) => isAliveInEra(id, kind, year, eraCounts);
+  const fieldScale = (fieldId: string | null | undefined) => fieldEraScale(fieldId, growth, eraReady);
 
-  if (focus?.kind === "field" && camera.zoom >= 3.15) {
-    candidates = subfields
-      .filter((item) => item.fieldId === focus.id)
-      .map((item) => ({ ...item, kind: "subfield" }));
-  } else if (focus?.kind === "subfield" && camera.zoom >= 4.0) {
-    candidates = topics
-      .filter((item) => item.subfieldId === focus.id)
-      .map((item) => ({ ...item, kind: "topic" }));
-  } else if (camera.zoom < 2.3) {
+  if (camera.zoom < 2.3) {
     candidates = domains.map((item) => ({ ...item, kind: "domain" }));
-  } else if (camera.zoom < 3.7) {
-    candidates = fields.filter((item) => living(item.id, "field")).map((item) => ({ ...item, kind: "field" }));
-  } else if (camera.zoom < 4.2) {
-    candidates = subfields
-      .filter((item) => item.id !== focus?.id && largeEnough(item.ring, minSpan))
-      .map((item) => ({ ...item, kind: "subfield" }));
   } else {
-    const neighbors = subfields
-      .filter(
-        (item) =>
-          item.id !== focusSubfieldId &&
-          inView(item.lon, item.lat) &&
-          largeEnough(item.ring, minSpan),
-      )
-      .map((item) => ({ ...item, kind: "subfield" }));
-    const interiorTopics = topics
-      .filter(
-        (item) =>
-          item.id !== focusTopicId &&
-          focusSubfieldId &&
-          item.subfieldId === focusSubfieldId &&
-          inView(item.lon, item.lat) &&
-          largeEnough(item.ring, mobile ? 36 : 64),
-      )
-      .map((item) => ({ ...item, kind: "topic" }));
-    candidates = [...interiorTopics, ...neighbors];
+    for (const field of fields) {
+      const scale = fieldScale(field.id);
+      if (scale <= 0 || !living(field.id, "field")) continue;
+
+      const childrenReady = camera.zoom >= 3.25 && scale >= 0.62;
+      const topicsReady = camera.zoom >= 4.35 && scale >= 0.85;
+
+      if (!childrenReady) {
+        candidates.push({ ...field, kind: "field" });
+        continue;
+      }
+
+      const kids = subfields.filter((item) => item.fieldId === field.id && living(item.id, "subfield"));
+      if (!topicsReady) {
+        candidates.push(...kids.map((item) => ({ ...item, kind: "subfield" })));
+        continue;
+      }
+
+      if (focus?.kind === "subfield" && focus.id && focus.fieldId === field.id) {
+        candidates.push(
+          ...topics
+            .filter((item) => item.subfieldId === focus.id && living(item.id, "topic"))
+            .map((item) => ({ ...item, kind: "topic" })),
+        );
+        candidates.push(
+          ...kids.filter((item) => item.id !== focus.id).map((item) => ({ ...item, kind: "subfield" })),
+        );
+      } else if (focus?.kind === "field" && focus.id === field.id) {
+        candidates.push(...kids.map((item) => ({ ...item, kind: "subfield" })));
+      } else {
+        candidates.push(...kids.map((item) => ({ ...item, kind: "subfield" })));
+      }
+    }
   }
 
   candidates.sort((a, b) => (b.worksCount ?? 0) - (a.worksCount ?? 0));
@@ -1152,7 +1195,9 @@ function collectLabels(
   const maxW = mobile ? 132 : 168;
 
   for (const item of candidates) {
-    const point = project(item.lon, item.lat, camera, size.width, size.height);
+    const placedAt = placePoint(item);
+    if (!placedAt) continue;
+    const point = project(placedAt.lon, placedAt.lat, camera, size.width, size.height);
     if (
       point.x < padSide ||
       point.y < padTop ||
@@ -1175,25 +1220,6 @@ function collectLabels(
     if (labels.length >= limit) break;
   }
   return labels;
-}
-
-function screenSpan(
-  ring: number[][],
-  camera: Camera,
-  size: { width: number; height: number },
-): number {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const [lon, lat] of ring) {
-    const point = project(lon, lat, camera, size.width, size.height);
-    if (point.x < minX) minX = point.x;
-    if (point.y < minY) minY = point.y;
-    if (point.x > maxX) maxX = point.x;
-    if (point.y > maxY) maxY = point.y;
-  }
-  return Math.max(maxX - minX, maxY - minY);
 }
 
 function isSpotlighted(
@@ -1230,36 +1256,17 @@ function overlaps(
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
-function parentsToFill(
-  focus: { id: string; kind: string; parentId: string | null; fieldId?: string; subfieldId?: string },
-  topics: ReturnType<typeof featuresFromCollection>,
-  subfields: ReturnType<typeof featuresFromCollection>,
+function fieldAnchor(
+  feature: { id: string; fieldId?: string | null; lon: number; lat: number },
+  fields: ReturnType<typeof featuresFromCollection>,
 ) {
-  if (focus.kind === "topic") {
-    return topics.filter((topic) => topic.id === focus.id);
-  }
-  if (focus.kind === "subfield") {
-    const kids = topics.filter((topic) => topic.subfieldId === focus.id);
-    return kids.length ? kids : subfields.filter((item) => item.id === focus.id);
-  }
-  if (focus.kind === "field") {
-    return topics.filter((topic) => topic.fieldId === focus.id);
-  }
-  return [];
-}
-
-function paperBelongsTo(
-  pin: Pin,
-  parent: { id: string; subfieldId?: string | null; fieldId?: string | null; ring: number[][] },
-  soleParent: boolean,
-) {
-  if (pin.placeId) {
-    if (pin.placeId === parent.id) return true;
-    if (soleParent && (pin.placeId === parent.subfieldId || pin.placeId === parent.fieldId)) return true;
-    return false;
-  }
-  if (soleParent) return true;
-  return pointInRing(pin.lon, pin.lat, parent.ring);
+  const fieldId = feature.id.startsWith("field:") ? feature.id : (feature.fieldId ?? null);
+  const home = fieldId ? fields.find((row) => row.id === fieldId) : undefined;
+  return {
+    fieldId,
+    lon: home?.lon ?? feature.lon,
+    lat: home?.lat ?? feature.lat,
+  };
 }
 
 function groupByField(items: ReturnType<typeof featuresFromCollection>) {

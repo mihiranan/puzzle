@@ -1,3 +1,4 @@
+import type { FeatureCollection, Polygon } from "geojson";
 import type { AtlasFeatureProperties, Place } from "./types";
 
 export type DrawnFeature = {
@@ -14,11 +15,11 @@ export type DrawnFeature = {
   lat: number;
 };
 
-const DOMAIN_COLORS: Record<string, { fill: string; coast: string; glow: string }> = {
-  "domain:3": { fill: "#3a2a18", coast: "#e8872a", glow: "rgba(232, 135, 42, 0.28)" },
-  "domain:1": { fill: "#2a2214", coast: "#c47a28", glow: "rgba(196, 122, 40, 0.26)" },
-  "domain:4": { fill: "#3a1c12", coast: "#d4622a", glow: "rgba(212, 98, 42, 0.26)" },
-  "domain:2": { fill: "#3d2c12", coast: "#e09a32", glow: "rgba(224, 154, 50, 0.28)" },
+const DOMAIN_COLORS: Record<string, { fill: string; coast: string }> = {
+  "domain:3": { fill: "#3a2a18", coast: "#e8872a" },
+  "domain:1": { fill: "#2a2214", coast: "#c47a28" },
+  "domain:4": { fill: "#3a1c12", coast: "#d4622a" },
+  "domain:2": { fill: "#3d2c12", coast: "#e09a32" },
 };
 
 export function domainPaint(domainId: string) {
@@ -52,7 +53,7 @@ export function ringToPath(ring: number[][]): string {
 }
 
 export function featuresFromCollection(
-  collection: GeoJSON.FeatureCollection<GeoJSON.Polygon, AtlasFeatureProperties>,
+  collection: FeatureCollection<Polygon, AtlasFeatureProperties>,
 ): DrawnFeature[] {
   return collection.features.flatMap((feature) => {
     if (feature.geometry?.type !== "Polygon") return [];
@@ -117,7 +118,7 @@ export function pointInRing(lon: number, lat: number, ring: number[][]): boolean
     const yi = ring[i][1];
     const xj = ring[j][0];
     const yj = ring[j][1];
-    const intersect = yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi + 0.0) + xi;
+    const intersect = yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi + 1e-12) + xi;
     if (intersect) inside = !inside;
   }
   return inside;

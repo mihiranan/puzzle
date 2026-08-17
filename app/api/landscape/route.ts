@@ -4,16 +4,17 @@ import { loadAtlas } from "@/lib/load-atlas";
 import {
   fieldActivityForYear,
   landscapeWorks,
-  openAlexFilterForPlace,
+  catalogFilterForPlace,
   workToPin,
-} from "@/lib/openalex";
+} from "@/lib/catalog";
+import { PRESENT_YEAR } from "@/lib/era-metrics";
 import type { EraLandscape, Place } from "@/lib/types";
 
 let presentCounts: Map<string, number> | null = null;
 
 async function presentDayCounts() {
   if (presentCounts) return presentCounts;
-  const rows = await fieldActivityForYear(2024);
+  const rows = await fieldActivityForYear(PRESENT_YEAR);
   presentCounts = new Map(rows.map((row) => [row.id, Math.max(row.count, 1)]));
   return presentCounts;
 }
@@ -31,13 +32,12 @@ export async function GET(request: Request) {
     const byId = indexPlaces(atlas);
     const place: Place | null = placeId ? byId.get(placeId) ?? null : null;
     const [works, fieldRows, present] = await Promise.all([
-      landscapeWorks(year, openAlexFilterForPlace(place)),
+      landscapeWorks(year, catalogFilterForPlace(place)),
       fieldActivityForYear(year),
       presentDayCounts(),
     ]);
 
     const maxField = Math.max(...fieldRows.map((row) => row.count), 1);
-    const globalPeak = Math.max(...present.values(), maxField, 1);
     const fieldActivity: Record<string, number> = {};
     const fieldGrowth: Record<string, number> = {};
     const domainTotals: Record<string, number> = {};
@@ -46,10 +46,10 @@ export async function GET(request: Request) {
       const field = byId.get(id);
       if (field?.domainId) presentDomain[field.domainId] = (presentDomain[field.domainId] ?? 0) + peak;
     }
-    const globalDomainPeak = Math.max(...Object.values(presentDomain), 1);
     for (const row of fieldRows) {
       fieldActivity[row.id] = 0.16 + 0.84 * (row.count / maxField);
-      fieldGrowth[row.id] = Math.max(0.06, Math.min(1, Math.sqrt(row.count / globalPeak)));
+      const peak = present.get(row.id) ?? 0;
+      fieldGrowth[row.id] = peak > 0 ? Math.max(0, Math.min(1, row.count / peak)) : 0;
       const field = byId.get(row.id);
       if (field?.domainId) {
         domainTotals[field.domainId] = (domainTotals[field.domainId] ?? 0) + row.count;
@@ -60,7 +60,8 @@ export async function GET(request: Request) {
     const domainGrowth: Record<string, number> = {};
     for (const [id, count] of Object.entries(domainTotals)) {
       domainActivity[id] = 0.16 + 0.84 * (count / maxDomain);
-      domainGrowth[id] = Math.max(0.08, Math.min(1, Math.sqrt(count / globalDomainPeak)));
+      const peak = presentDomain[id] ?? 0;
+      domainGrowth[id] = peak > 0 ? Math.max(0, Math.min(1, count / peak)) : 0;
     }
 
     const pins = works

@@ -33,10 +33,6 @@ export function kindLabel(kind: string): string {
   }
 }
 
-export function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n));
-}
-
 export function cleanText(value: string | null | undefined): string {
   if (!value) return "";
   return value
@@ -51,7 +47,6 @@ export function cleanText(value: string | null | undefined): string {
     .trim();
 }
 
-/** Professional sentence casing for blurbs that arrive lowercase from OpenAlex. */
 export function polishCopy(value: string | null | undefined): string {
   const text = cleanText(value);
   if (!text) return "";

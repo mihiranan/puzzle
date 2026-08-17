@@ -1,11 +1,10 @@
 "use client";
 
+import { ERA_MAX, ERA_MIN } from "@/lib/era-metrics";
+
 type Props = {
   year: number;
   playing: boolean;
-  loading?: boolean;
-  headline?: string | null;
-  hottestField?: string | null;
   min?: number;
   max?: number;
   onYear: (year: number) => void;
@@ -15,8 +14,8 @@ type Props = {
 export default function Timeline({
   year,
   playing,
-  min = 1950,
-  max = 2026,
+  min = ERA_MIN,
+  max = ERA_MAX,
   onYear,
   onPlaying,
 }: Props) {

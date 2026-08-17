@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build a geographic atlas of OpenAlex knowledge:
+ * Build a geographic atlas of knowledge:
  * 4 domain continents → field countries → subfield provinces → topic cities.
  */
 import { mkdir, writeFile } from "node:fs/promises";
@@ -11,8 +11,8 @@ import { Delaunay } from "d3-delaunay";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = resolve(ROOT, "public/data/atlas.json");
 const META = resolve(ROOT, "public/data/atlas.meta.json");
-const OA = "https://api.openalex.org";
-const MAILTO = process.env.OPENALEX_MAILTO ?? "mihiranan@users.noreply.github.com";
+const CATALOG_ORIGIN = "https://api.openalex.org";
+const MAILTO = process.env.CATALOG_MAILTO ?? "mihiranan@users.noreply.github.com";
 
 const CONTINENTS = {
   "Physical Sciences": { lon: -102, lat: 18, r: 44 },
@@ -59,6 +59,10 @@ function hash32(s) {
   return h >>> 0;
 }
 
+function sourceRef(url) {
+  return String(url ?? "").replace(/^https?:\/\/openalex\.org\//i, "");
+}
+
 function shortId(url) {
   const raw = String(url).split("/").pop() ?? "";
   if (raw.startsWith("T")) return `topic:${raw}`;
@@ -72,10 +76,10 @@ function shortId(url) {
   return raw;
 }
 
-async function oa(path) {
+async function catalogGet(path) {
   const url = path.startsWith("http")
     ? path
-    : `${OA}${path}${path.includes("?") ? "&" : "?"}mailto=${encodeURIComponent(MAILTO)}`;
+    : `${CATALOG_ORIGIN}${path}${path.includes("?") ? "&" : "?"}mailto=${encodeURIComponent(MAILTO)}`;
   let last;
   for (let attempt = 0; attempt < 6; attempt++) {
     const res = await fetch(url, {
@@ -85,24 +89,24 @@ async function oa(path) {
       },
     });
     if (res.status === 429 || res.status >= 500) {
-      last = new Error(`OpenAlex ${res.status} for ${path}`);
+      last = new Error(`Catalog ${res.status} for ${path}`);
       await sleep(400 * 2 ** attempt);
       continue;
     }
-    if (!res.ok) throw new Error(`OpenAlex ${res.status} for ${path}`);
+    if (!res.ok) throw new Error(`Catalog ${res.status} for ${path}`);
     return res.json();
   }
-  throw last ?? new Error(`OpenAlex failed for ${path}`);
+  throw last ?? new Error(`Catalog failed for ${path}`);
 }
 
 async function fetchAll(path, perPage = 200) {
-  const first = await oa(`${path}${path.includes("?") ? "&" : "?"}per_page=${perPage}&page=1`);
+  const first = await catalogGet(`${path}${path.includes("?") ? "&" : "?"}per_page=${perPage}&page=1`);
   const total = first.meta?.count ?? first.results.length;
   const pages = Math.ceil(total / perPage);
   const results = [...first.results];
   for (let page = 2; page <= pages; page++) {
     await sleep(120);
-    const data = await oa(
+    const data = await catalogGet(
       `${path}${path.includes("?") ? "&" : "?"}per_page=${perPage}&page=${page}`,
     );
     results.push(...data.results);
@@ -446,7 +450,7 @@ function feature(place, geometry) {
 }
 
 async function main() {
-  console.log("Fetching OpenAlex taxonomy…");
+  console.log("Fetching taxonomy…");
   const [domains, fields, subfields, topics] = await Promise.all([
     fetchAll("/domains", 25),
     fetchAll("/fields", 50),
@@ -482,7 +486,7 @@ async function main() {
 
     const domainPlace = {
       id: shortId(domain.id),
-      openalexId: domain.id,
+      sourceId: sourceRef(domain.id),
       name,
       kind: "domain",
       description: domain.description ?? "",
@@ -523,7 +527,7 @@ async function main() {
       const tint = ((hash32(raw.display_name) % 24) - 10) * 2;
       const fieldPlace = {
         id: shortId(raw.id),
-        openalexId: raw.id,
+        sourceId: sourceRef(raw.id),
         name: raw.display_name,
         kind: "field",
         description: raw.description ?? "",
@@ -569,7 +573,7 @@ async function main() {
         const stint = ((hash32(sraw.display_name) % 20) - 8) * 2;
         const subPlace = {
           id: shortId(sraw.id),
-          openalexId: sraw.id,
+          sourceId: sourceRef(sraw.id),
           name: sraw.display_name,
           kind: "subfield",
           description: sraw.description ?? "",
@@ -613,7 +617,7 @@ async function main() {
           const [tlon, tlat] = localToLonLat(continent, tc[0], tc[1]);
           const topicPlace = {
             id: shortId(topic.id),
-            openalexId: topic.id,
+            sourceId: sourceRef(topic.id),
             name: topic.display_name,
             kind: "topic",
             description: topic.description ?? "",
@@ -664,7 +668,7 @@ async function main() {
 
   const atlas = {
     generatedAt: new Date().toISOString(),
-    source: "OpenAlex",
+    source: "Puzzle",
     stats: {
       domains: places.filter((p) => p.kind === "domain").length,
       fields: places.filter((p) => p.kind === "field").length,

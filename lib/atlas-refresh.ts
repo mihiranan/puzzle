@@ -82,10 +82,15 @@ async function lockIsLive(): Promise<boolean> {
 async function takeLock(): Promise<boolean> {
   if (await lockIsLive()) return false;
   try {
+    await unlink(LOCK_PATH);
+  } catch {
+    /* no leftover lock */
+  }
+  try {
     await writeFile(
       LOCK_PATH,
       JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
-      { flag: "w" },
+      { flag: "wx" },
     );
     return true;
   } catch {
@@ -135,7 +140,7 @@ async function rebuildAtlas(): Promise<void> {
   }
 }
 
-export function startAtlasRefresh(): boolean {
+function startAtlasRefresh(): boolean {
   if (building) return false;
   building = rebuildAtlas()
     .catch((error) => {

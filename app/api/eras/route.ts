@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { indexPlaces } from "@/lib/atlas";
-import { KEY_YEARS, type EraSnapshots } from "@/lib/era-metrics";
+import { KEY_YEARS, PRESENT_YEAR, type EraSnapshots } from "@/lib/era-metrics";
 import { loadAtlas } from "@/lib/load-atlas";
-import { corpusThroughYear } from "@/lib/openalex";
+import { corpusThroughYear } from "@/lib/catalog";
 
 let cached: EraSnapshots | null = null;
 const CACHE_KIND = "corpus-through-year-v2-topics";
@@ -32,11 +32,10 @@ export async function GET() {
       names[row.id] = row.name;
       const place = byId.get(row.id);
       if (place?.domainId) domains[row.id] = place.domainId;
-      if (place?.kind === "field" && place.domainId) domains[row.id] = place.domainId;
     }
   }
 
-  const present = counts[2024] ?? counts[KEY_YEARS[KEY_YEARS.length - 1]] ?? {};
+  const present = counts[PRESENT_YEAR] ?? {};
   cached = {
     years: KEY_YEARS,
     names,

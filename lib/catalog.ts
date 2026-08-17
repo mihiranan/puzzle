@@ -10,13 +10,13 @@ import type {
   SearchHit,
 } from "./types";
 
-const OA = "https://api.openalex.org";
+const CATALOG_ORIGIN = "https://api.openalex.org";
 
-export function openAlexMailto(): string {
-  return process.env.OPENALEX_MAILTO ?? "mihiranan@users.noreply.github.com";
+function catalogMailto(): string {
+  return process.env.CATALOG_MAILTO ?? "mihiranan@users.noreply.github.com";
 }
 
-export function shortOpenAlexId(url: string | null | undefined): string {
+function shortSourceId(url: string | null | undefined): string {
   if (!url) return "";
   const raw = String(url).split("/").pop() ?? "";
   if (raw.startsWith("T")) return `topic:${raw}`;
@@ -30,7 +30,7 @@ export function shortOpenAlexId(url: string | null | undefined): string {
   return raw;
 }
 
-export function parseEntityId(id: string): { kind: EntityKind; openalexId: string } | null {
+function parseEntityId(id: string): { kind: EntityKind; sourceId: string } | null {
   const [kind, rest] = id.split(":");
   if (!kind || !rest) return null;
   const path =
@@ -52,36 +52,36 @@ export function parseEntityId(id: string): { kind: EntityKind; openalexId: strin
                     ? `domains/${rest}`
                     : null;
   if (!path) return null;
-  return { kind: kind as EntityKind, openalexId: `${OA}/${path}` };
+  return { kind: kind as EntityKind, sourceId: `${CATALOG_ORIGIN}/${path}` };
 }
 
-type OpenAlexEntity = Record<string, unknown>;
+type CatalogRecord = Record<string, unknown>;
 
-type OpenAlexPage = {
-  results?: OpenAlexEntity[];
+type CatalogPage = {
+  results?: CatalogRecord[];
   meta?: { count?: number };
 };
 
-async function oa<T>(path: string): Promise<T> {
-  const mailto = openAlexMailto();
+async function catalogGet<T>(path: string): Promise<T> {
+  const mailto = catalogMailto();
   const url = path.startsWith("http")
     ? `${path}${path.includes("?") ? "&" : "?"}mailto=${encodeURIComponent(mailto)}`
-    : `${OA}${path}${path.includes("?") ? "&" : "?"}mailto=${encodeURIComponent(mailto)}`;
+    : `${CATALOG_ORIGIN}${path}${path.includes("?") ? "&" : "?"}mailto=${encodeURIComponent(mailto)}`;
   const headers: Record<string, string> = {
     "User-Agent": `Puzzle/0.1 (https://github.com/mihiranan/puzzle; mailto:${mailto})`,
     Accept: "application/json",
   };
-  if (process.env.OPENALEX_API_KEY) {
-    headers.Authorization = `Bearer ${process.env.OPENALEX_API_KEY}`;
+  if (process.env.CATALOG_API_KEY) {
+    headers.Authorization = `Bearer ${process.env.CATALOG_API_KEY}`;
   }
   const res = await fetch(url, { headers, next: { revalidate: 3600 } });
   if (!res.ok) {
-    throw new Error(`OpenAlex ${res.status} for ${path}`);
+    throw new Error(`Catalog ${res.status} for ${path}`);
   }
   return res.json() as Promise<T>;
 }
 
-export function invertAbstract(
+function invertAbstract(
   inverted: Record<string, number[]> | null | undefined,
 ): string {
   if (!inverted) return "";
@@ -102,14 +102,14 @@ type AutocompleteItem = {
 };
 
 export async function autocomplete(query: string): Promise<SearchHit[]> {
-  const data = await oa<{ results: AutocompleteItem[] }>(
+  const data = await catalogGet<{ results: AutocompleteItem[] }>(
     `/autocomplete?q=${encodeURIComponent(query)}`,
   );
   return (data.results ?? [])
     .filter((item) => item.entity_type !== "funder" && item.entity_type !== "publisher")
     .map((item) => ({
-      id: shortOpenAlexId(item.id),
-      openalexId: item.id,
+      id: shortSourceId(item.id),
+      sourceId: item.id,
       kind: (item.entity_type === "keyword" ? "keyword" : item.entity_type) as EntityKind,
       name: cleanText(item.display_name),
       hint: item.hint,
@@ -118,12 +118,12 @@ export async function autocomplete(query: string): Promise<SearchHit[]> {
     }));
 }
 
-function asRecord(value: unknown): OpenAlexEntity | null {
-  return value && typeof value === "object" ? (value as OpenAlexEntity) : null;
+function asRecord(value: unknown): CatalogRecord | null {
+  return value && typeof value === "object" ? (value as CatalogRecord) : null;
 }
 
-function asList(value: unknown): OpenAlexEntity[] {
-  return Array.isArray(value) ? value.filter((item): item is OpenAlexEntity => Boolean(asRecord(item))) : [];
+function asList(value: unknown): CatalogRecord[] {
+  return Array.isArray(value) ? value.filter((item): item is CatalogRecord => Boolean(asRecord(item))) : [];
 }
 
 function displayName(value: unknown): string {
@@ -132,7 +132,7 @@ function displayName(value: unknown): string {
   return "";
 }
 
-function topicIdsFrom(entity: OpenAlexEntity): {
+function topicIdsFrom(entity: CatalogRecord): {
   topicId?: string;
   subfieldId?: string;
   fieldId?: string;
@@ -141,20 +141,20 @@ function topicIdsFrom(entity: OpenAlexEntity): {
   const primary = asRecord(entity.primary_topic) ?? asList(entity.topics)[0];
   if (!primary) return {};
   return {
-    topicId: shortOpenAlexId(String(primary.id ?? "")),
-    subfieldId: shortOpenAlexId(String(asRecord(primary.subfield)?.id ?? "")),
-    fieldId: shortOpenAlexId(String(asRecord(primary.field)?.id ?? "")),
-    domainId: shortOpenAlexId(String(asRecord(primary.domain)?.id ?? "")),
+    topicId: shortSourceId(String(primary.id ?? "")),
+    subfieldId: shortSourceId(String(asRecord(primary.subfield)?.id ?? "")),
+    fieldId: shortSourceId(String(asRecord(primary.field)?.id ?? "")),
+    domainId: shortSourceId(String(asRecord(primary.domain)?.id ?? "")),
   };
 }
 
 function linkFrom(
-  entity: OpenAlexEntity,
+  entity: CatalogRecord,
   kind: EntityKind,
   extra?: Partial<NeighborhoodLink>,
 ): NeighborhoodLink {
   return {
-    id: shortOpenAlexId(String(entity.id ?? "")),
+    id: shortSourceId(String(entity.id ?? "")),
     kind,
     name: cleanText(String(entity.display_name ?? "Untitled")),
     hint: extra?.hint ? cleanText(extra.hint) : extra?.hint,
@@ -163,13 +163,13 @@ function linkFrom(
   };
 }
 
-async function hydrateWorks(ids: string[], limit = 6): Promise<OpenAlexEntity[]> {
+async function hydrateWorks(ids: string[], limit = 6): Promise<CatalogRecord[]> {
   const clean = ids
     .map((id) => id.split("/").pop())
     .filter(Boolean)
     .slice(0, limit);
   if (!clean.length) return [];
-  const data = await oa<{ results: OpenAlexEntity[] }>(
+  const data = await catalogGet<{ results: CatalogRecord[] }>(
     `/works?filter=openalex:${clean.join("|")}&per_page=${clean.length}`,
   );
   return data.results ?? [];
@@ -187,10 +187,10 @@ export async function inspectEntity(
     let works: NeighborhoodLink[] = [];
     let yearWorks: number | undefined;
     try {
-      const filter = [openAlexFilterForPlace(local), untilYear ? yearRangeFilter(untilYear) : null]
+      const filter = [catalogFilterForPlace(local), untilYear ? yearRangeFilter(untilYear) : null]
         .filter(Boolean)
         .join(",");
-      const data = await oa<OpenAlexPage>(
+      const data = await catalogGet<CatalogPage>(
         `/works?filter=${encodeURIComponent(filter)}&sort=cited_by_count:desc&per_page=8&select=id,display_name,publication_year,cited_by_count,authorships`,
       );
       works = (data.results ?? []).map((work) => linkFrom(work, "work"));
@@ -202,7 +202,7 @@ export async function inspectEntity(
     const sized = scaleCountsToYear(untilYear, yearWorks, local.worksCount, local.citedByCount);
     return {
       id: local.id,
-      openalexId: local.openalexId,
+      sourceId: local.sourceId,
       kind: local.kind,
       name: local.name,
       description: local.description ?? "",
@@ -240,21 +240,7 @@ export async function inspectEntity(
   const parsed = parseEntityId(id);
   if (!parsed) throw new Error(`Unknown entity ${id}`);
 
-  const pathKind =
-    parsed.kind === "work"
-      ? `/works/${id.split(":")[1]}`
-      : parsed.kind === "author"
-        ? `/authors/${id.split(":")[1]}`
-        : parsed.kind === "institution"
-          ? `/institutions/${id.split(":")[1]}`
-          : parsed.kind === "source"
-            ? `/sources/${id.split(":")[1]}`
-            : parsed.kind === "topic"
-              ? `/topics/${id.split(":")[1]}`
-              : null;
-  if (!pathKind) throw new Error(`Cannot inspect ${id}`);
-
-  const entity = await oa<OpenAlexEntity>(pathKind);
+  const entity = await catalogGet<CatalogRecord>(parsed.sourceId);
   const ids = topicIdsFrom(entity);
   const preferField = parsed.kind === "institution" || parsed.kind === "author";
   const place =
@@ -300,7 +286,7 @@ export async function inspectEntity(
     const source = asRecord(asRecord(entity.primary_location)?.source);
     return {
       id,
-      openalexId: String(entity.id ?? parsed.openalexId),
+      sourceId: String(entity.id ?? parsed.sourceId),
       kind: "work",
       name: cleanText(String(entity.display_name ?? "Untitled paper")),
       whyHere,
@@ -335,7 +321,7 @@ export async function inspectEntity(
     ]
       .filter(Boolean)
       .join(",");
-    const worksData = await oa<OpenAlexPage>(
+    const worksData = await catalogGet<CatalogPage>(
       `/works?filter=${encodeURIComponent(authorFilter)}&sort=cited_by_count:desc&per_page=8`,
     );
     const works = worksData.results ?? [];
@@ -350,7 +336,7 @@ export async function inspectEntity(
       for (const row of asList(work.authorships)) {
         const author = asRecord(row.author);
         if (!author) continue;
-        const authorId = shortOpenAlexId(String(author.id ?? ""));
+        const authorId = shortSourceId(String(author.id ?? ""));
         if (!authorId || authorId === id || people.has(authorId)) continue;
         people.set(authorId, linkFrom(author, "author"));
       }
@@ -358,13 +344,13 @@ export async function inspectEntity(
     const knownInstitutions = asList(entity.last_known_institutions);
     const affiliationInstitutions = asList(entity.affiliations)
       .map((row) => asRecord(row.institution))
-      .filter((inst): inst is OpenAlexEntity => Boolean(inst));
+      .filter((inst): inst is CatalogRecord => Boolean(inst));
     const institutions = (knownInstitutions.length ? knownInstitutions : affiliationInstitutions).map(
       (inst) => linkFrom(inst, "institution"),
     );
     return {
       id,
-      openalexId: String(entity.id ?? parsed.openalexId),
+      sourceId: String(entity.id ?? parsed.sourceId),
       kind: "author",
       name: cleanText(String(entity.display_name ?? "Unknown researcher")),
       hint: institutions[0]?.name ?? null,
@@ -392,7 +378,7 @@ export async function inspectEntity(
     ]
       .filter(Boolean)
       .join(",");
-    const worksData = await oa<OpenAlexPage>(
+    const worksData = await catalogGet<CatalogPage>(
       `/works?filter=${encodeURIComponent(instFilter)}&sort=cited_by_count:desc&per_page=8`,
     );
     const instSized = scaleCountsToYear(
@@ -405,7 +391,7 @@ export async function inspectEntity(
     const hint = [geo?.city, geo?.country].filter(Boolean).join(", ") || String(entity.type ?? "");
     return {
       id,
-      openalexId: String(entity.id ?? parsed.openalexId),
+      sourceId: String(entity.id ?? parsed.sourceId),
       kind: "institution",
       name: cleanText(String(entity.display_name ?? "Institution")),
       hint,
@@ -434,7 +420,7 @@ export async function inspectEntity(
     ]
       .filter(Boolean)
       .join(",");
-    const worksData = await oa<OpenAlexPage>(
+    const worksData = await catalogGet<CatalogPage>(
       `/works?filter=${encodeURIComponent(sourceFilter)}&sort=cited_by_count:desc&per_page=8`,
     );
     const sourceSized = scaleCountsToYear(
@@ -445,7 +431,7 @@ export async function inspectEntity(
     );
     return {
       id,
-      openalexId: String(entity.id ?? parsed.openalexId),
+      sourceId: String(entity.id ?? parsed.sourceId),
       kind: "source",
       name: cleanText(String(entity.display_name ?? "Journal")),
       whyHere,
@@ -468,7 +454,7 @@ export async function inspectEntity(
 
   return {
     id,
-    openalexId: String(entity.id ?? parsed.openalexId),
+    sourceId: String(entity.id ?? parsed.sourceId),
     kind: parsed.kind,
     name: String(entity.display_name ?? id),
     description: entity.description ? String(entity.description) : "",
@@ -505,37 +491,33 @@ export function yearRangeFilter(untilYear: number): string {
 export async function landscapeWorks(
   year: number,
   filter: string | null,
-): Promise<OpenAlexEntity[]> {
+): Promise<CatalogRecord[]> {
   const parts = [yearRangeFilter(year)];
   if (filter) parts.push(filter);
-  const data = await oa<{ results: OpenAlexEntity[] }>(
+  const data = await catalogGet<{ results: CatalogRecord[] }>(
     `/works?filter=${encodeURIComponent(parts.join(","))}&sort=cited_by_count:desc&per_page=16&select=id,display_name,publication_year,cited_by_count,authorships,primary_topic,primary_location`,
   );
   return data.results ?? [];
 }
 
-export async function influentialWorks(filter: string | null, untilYear?: number): Promise<OpenAlexEntity[]> {
+export async function influentialWorks(filter: string | null, untilYear?: number): Promise<CatalogRecord[]> {
   const parts: string[] = [];
   if (untilYear) parts.push(yearRangeFilter(untilYear));
   if (filter) parts.push(filter);
   const query = parts.length
     ? `/works?filter=${encodeURIComponent(parts.join(","))}&sort=cited_by_count:desc&per_page=36&select=id,display_name,publication_year,cited_by_count,authorships,primary_topic,primary_location`
     : `/works?sort=cited_by_count:desc&per_page=24&select=id,display_name,publication_year,cited_by_count,authorships,primary_topic,primary_location`;
-  const data = await oa<{ results: OpenAlexEntity[] }>(query);
+  const data = await catalogGet<{ results: CatalogRecord[] }>(query);
   return data.results ?? [];
 }
-
-const LANDMARK_WORKS: { id: string; placeIds: string[] }[] = [
-  { id: "W2626778328", placeIds: ["topic:T10181", "subfield:1702", "field:17"] },
-];
 
 export async function influentialWorksForPlace(
   place: Place,
   atlas: Atlas,
   untilYear?: number,
-): Promise<OpenAlexEntity[]> {
-  const main = await influentialWorks(openAlexFilterForPlace(place), untilYear);
-  const extras: OpenAlexEntity[] = [];
+): Promise<CatalogRecord[]> {
+  const main = await influentialWorks(catalogFilterForPlace(place), untilYear);
+  const extras: CatalogRecord[] = [];
   if (place.kind === "subfield" || place.kind === "field") {
     const children = atlas.places
       .filter((row) => row.parentId === place.id && row.kind === "topic")
@@ -544,22 +526,13 @@ export async function influentialWorksForPlace(
     if (children.length) {
       const featured = await Promise.all(
         children.map((row) =>
-          influentialWorks(`primary_topic.id:${row.openalexId.split("/").pop()}`, untilYear),
+          influentialWorks(`primary_topic.id:${row.sourceId.split("/").pop()}`, untilYear),
         ),
       );
       extras.push(...featured.flatMap((list) => list.slice(0, 8)));
     }
   }
-  const landmarkIds = LANDMARK_WORKS.filter(
-    (row) =>
-      row.placeIds.includes(place.id) ||
-      (place.fieldId ? row.placeIds.includes(place.fieldId) : false) ||
-      (place.subfieldId ? row.placeIds.includes(place.subfieldId) : false),
-  ).map((row) => row.id);
-  if (landmarkIds.length) {
-    extras.push(...(await hydrateWorks(landmarkIds.map((id) => `https://openalex.org/${id}`), landmarkIds.length)));
-  }
-  const merged = new Map<string, OpenAlexEntity>();
+  const merged = new Map<string, CatalogRecord>();
   for (const work of [...main, ...extras]) {
     const id = String(work.id ?? "");
     const prev = merged.get(id);
@@ -567,21 +540,13 @@ export async function influentialWorksForPlace(
       merged.set(id, work);
     }
   }
-  const landmarkSet = new Set(landmarkIds.map((id) => id.toLowerCase()));
   return [...merged.values()]
     .filter((work) => {
       if (untilYear == null) return true;
       const published = work.publication_year;
       return typeof published !== "number" || published <= untilYear;
     })
-    .sort((a, b) => {
-      const aId = String(a.id ?? "").split("/").pop()?.toLowerCase() ?? "";
-      const bId = String(b.id ?? "").split("/").pop()?.toLowerCase() ?? "";
-      const aMark = landmarkSet.has(aId);
-      const bMark = landmarkSet.has(bId);
-      if (aMark !== bMark) return aMark ? -1 : 1;
-      return Number(b.cited_by_count ?? 0) - Number(a.cited_by_count ?? 0);
-    })
+    .sort((a, b) => Number(b.cited_by_count ?? 0) - Number(a.cited_by_count ?? 0))
     .slice(0, 40);
 }
 
@@ -599,7 +564,7 @@ export async function corpusThroughYear(
   year: number,
   groupBy: string,
 ): Promise<{ id: string; name: string; count: number }[]> {
-  const data = await oa<{ group_by?: GroupRow[] }>(
+  const data = await catalogGet<{ group_by?: GroupRow[] }>(
     `/works?filter=${yearRangeFilter(year)}&group_by=${groupBy}`,
   );
   return (data.group_by ?? []).map((row) => ({
@@ -610,7 +575,7 @@ export async function corpusThroughYear(
 }
 
 function normalizeGroupId(key: string, groupBy: string): string {
-  const short = shortOpenAlexId(key);
+  const short = shortSourceId(key);
   if (short.startsWith("field:") || short.startsWith("subfield:") || short.startsWith("topic:")) return short;
   if (groupBy.includes("subfield") && /^\d+$/.test(short)) return `subfield:${short}`;
   if (groupBy.includes("field") && /^\d+$/.test(short)) return `field:${short}`;
@@ -619,7 +584,7 @@ function normalizeGroupId(key: string, groupBy: string): string {
 }
 
 export function workToPin(
-  work: OpenAlexEntity,
+  work: CatalogRecord,
   atlas: Atlas,
   byId: Map<string, Place>,
 ): {
@@ -637,14 +602,14 @@ export function workToPin(
   const place = locatePlace(byId, ids.topicId, ids.subfieldId, ids.fieldId, ids.domainId);
   if (!place) return null;
   const spread = Math.max(0.2, (place.radius || 0.4) * 0.78);
-  const point = jitter(place.lon, place.lat, shortOpenAlexId(String(work.id ?? "")), spread);
+  const point = jitter(place.lon, place.lat, shortSourceId(String(work.id ?? "")), spread);
   const authors = asList(work.authorships)
     .map((row) => displayName(asRecord(row.author)))
     .filter(Boolean)
     .slice(0, 2)
     .join(", ");
   return {
-    id: shortOpenAlexId(String(work.id ?? "")),
+    id: shortSourceId(String(work.id ?? "")),
     kind: "work",
     name: cleanText(String(work.display_name ?? "Untitled")),
     lon: point.lon,
@@ -659,13 +624,13 @@ export function workToPin(
 function placementCopy(kind: EntityKind, place: Place | null): string | null {
   if (!place) return null;
   if (kind === "institution") {
-    return `Not a campus on Earth. This university is placed in ${place.name} because that is where OpenAlex classifies most of its papers.`;
+    return `Not a campus on Earth. This university is placed in ${place.name} because that is where most of its papers sit.`;
   }
   if (kind === "author") {
     return `Researchers live in the field of their most-cited work. This person is placed in ${place.name}.`;
   }
   if (kind === "work") {
-    return `Papers sit in the topic OpenAlex assigned as their primary subject: ${place.name}.`;
+    return `Papers sit in the topic assigned as their primary subject: ${place.name}.`;
   }
   if (kind === "source") {
     return `Journals are placed in the field they publish most: ${place.name}.`;
@@ -673,11 +638,11 @@ function placementCopy(kind: EntityKind, place: Place | null): string | null {
   return null;
 }
 
-export function openAlexFilterForPlace(place: Place | null): string | null {
+export function catalogFilterForPlace(place: Place | null): string | null {
   if (!place) return null;
-  if (place.kind === "topic") return `primary_topic.id:${place.openalexId.split("/").pop()}`;
-  if (place.kind === "subfield") return `primary_topic.subfield.id:${place.openalexId.split("/").pop()}`;
-  if (place.kind === "field") return `primary_topic.field.id:${place.openalexId.split("/").pop()}`;
-  if (place.kind === "domain") return `primary_topic.domain.id:${place.openalexId.split("/").pop()}`;
+  if (place.kind === "topic") return `primary_topic.id:${place.sourceId.split("/").pop()}`;
+  if (place.kind === "subfield") return `primary_topic.subfield.id:${place.sourceId.split("/").pop()}`;
+  if (place.kind === "field") return `primary_topic.field.id:${place.sourceId.split("/").pop()}`;
+  if (place.kind === "domain") return `primary_topic.domain.id:${place.sourceId.split("/").pop()}`;
   return null;
 }
