@@ -496,7 +496,13 @@ export default function Explorer() {
         closeInspector();
         return;
       }
-      if (welcome) setWelcome(false);
+      if (welcome) {
+        setWelcome(false);
+        return;
+      }
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: "puzzle:escape" }, "*");
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
