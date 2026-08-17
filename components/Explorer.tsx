@@ -661,7 +661,7 @@ export default function Explorer() {
       {dossierOpen && narrow && sheetHidden && (
         <button
           type="button"
-          className="hud-bar pointer-events-auto fixed inset-x-2 z-30 flex items-center justify-between gap-3 px-3 py-2.5"
+          className="hud-bar pointer-events-auto fixed inset-x-2 z-50 flex items-center justify-between gap-3 px-3 py-2.5"
           style={{ bottom: "calc(3.65rem + max(0.45rem, env(safe-area-inset-bottom)))" }}
           onClick={() => setSheetHidden(false)}
         >
@@ -679,7 +679,7 @@ export default function Explorer() {
 
       {dossierOpen && narrow && !sheetHidden && (
         <div
-          className="pointer-events-none fixed inset-x-2 z-30 flex flex-col"
+          className="pointer-events-none fixed inset-x-2 z-50 flex flex-col"
           style={{
             bottom: "calc(3.65rem + max(0.45rem, env(safe-area-inset-bottom)))",
             height: `${Math.round(viewHeight * sheetRatio)}px`,
